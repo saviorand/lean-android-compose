@@ -89,7 +89,25 @@ indicator and does the work on `Dispatchers.Default`.
 - `lean_nat_to_string` does not exist. `Nat` to `String` is `l_Nat_reprFast`,
   declared `extern`; it consumes its argument.
 
-**The Lean-authored screen is generated at build time**, not by Lean running on the
-phone: `app/src/main/assets/screen.json` is `lean-compose`'s output. Cross-compiling
-that library into `libleanshared.so` would let the layout depend on runtime state
-via the already-exported `lean_demo_screen_json`.
+**Lean computes the view tree on the device.** `Lean.screenJson(count)` calls into
+`lean-compose` with the current state and gets back a whole tree, so the layout is a
+function of runtime state rather than something fixed at build time. That is what
+makes this usable for server-driven UI: the Lean side decides what the screen is,
+and `LeanView.kt` only knows how to draw nodes.
+
+`lean-compose` does not need a full Lean rebuild to get onto the device. Lean emits
+C for it under `.lake/build/ir/`, and that C cross-compiles against the existing
+`libleanshared.so`:
+
+```
+for f in <lean-compose>/.lake/build/ir/Compose/*.c; do
+  $NDK/bin/aarch64-linux-android34-clang -c -fPIC -O2 "$f" -I $LEAN/include -o "obj/$(basename $f .c).o"
+done
+$NDK/bin/aarch64-linux-android34-clang -shared -fPIC -o app/src/main/jniLibs/arm64-v8a/libleancompose.so \
+  obj/*.o -L $LEAN/lib/lean -lleanshared -Wl,--no-undefined
+```
+
+The result is ~100 KB. Its module initialiser
+(`initialize_lean_x2dcompose_Compose_Demo`) has to run after the core runtime is up
+and **before** `lean_io_mark_end_initialization`, or the constants it allocates are
+not registered as GC roots.

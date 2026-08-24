@@ -29,6 +29,7 @@ private fun Screen() {
     var ready by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf("starting the Lean runtime…") }
     var n by remember { mutableStateOf(20) }
+    var leanCount by remember { mutableStateOf(0) }
     var factorial by remember { mutableStateOf("") }
     var listSum by remember { mutableStateOf("") }
 
@@ -59,11 +60,14 @@ private fun Screen() {
 
         HorizontalDivider()
 
-        // A screen whose structure was authored in Lean and checked by its type
-        // system; see ../../lean-compose. The JSON is generated at build time for
-        // now, since the Lean library still has to be cross-compiled into
-        // libleanshared.so to be callable over JNI.
-        LeanAuthoredScreen()
+        // Lean computes this whole subtree on the device from `leanCount`, so the
+        // buttons below change the layout by changing the state Lean sees.
+        LeanAuthoredScreen(leanCount) { action ->
+            when (action) {
+                "inc" -> leanCount++
+                "reset" -> leanCount = 0
+            }
+        }
 
         HorizontalDivider()
 

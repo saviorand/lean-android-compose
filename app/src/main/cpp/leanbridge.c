@@ -11,6 +11,12 @@ extern void lean_io_mark_end_initialization(void);
 // Nat.reprFast from the standard library; consumes its argument.
 extern lean_object * l_Nat_reprFast(lean_object * n);
 
+// lean-compose, cross-compiled separately and linked alongside. Its module
+// initialiser has to run before anything in it is called, and it must run after
+// the core runtime is up.
+extern lean_object * initialize_lean_x2dcompose_Compose_Demo(uint8_t builtin, lean_object * w);
+extern lean_object * lean_demo_screen_json(uint32_t count);
+
 static int g_ready = 0;
 
 static int ensure_init(void) {
@@ -19,8 +25,18 @@ static int ensure_init(void) {
   lean_object *res = initialize_Init(1, lean_io_mk_world());
   int ok = lean_io_result_is_ok(res);
   lean_dec_ref(res);
-  if (ok) { lean_io_mark_end_initialization(); g_ready = 1; }
-  return ok;
+  if (!ok) return 0;
+
+  // Module initialisers run before end-of-initialisation is marked, otherwise the
+  // constants they allocate are not registered as roots.
+  lean_object *ui = initialize_lean_x2dcompose_Compose_Demo(1, lean_io_mk_world());
+  ok = lean_io_result_is_ok(ui);
+  lean_dec_ref(ui);
+  if (!ok) return 0;
+
+  lean_io_mark_end_initialization();
+  g_ready = 1;
+  return 1;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -79,4 +95,17 @@ Java_com_leanandroid_compose_Lean_sumTo(JNIEnv *e, jclass c, jint n) {
   }
   lean_dec_ref(xs);
   return (jlong)total;
+}
+
+// The view tree, rendered by Lean on the device rather than baked in at build time.
+// This is what makes a server-driven UI possible: the layout is a function of state
+// the app holds now, and the type checker has already ruled out invalid nesting.
+JNIEXPORT jstring JNICALL
+Java_com_leanandroid_compose_Lean_screenJson(JNIEnv *e, jclass c, jint count) {
+  (void)c;
+  if (!ensure_init()) return (*e)->NewStringUTF(e, "{\"t\":\"text\",\"content\":\"init failed\",\"style\":\"body\"}");
+  lean_object *s = lean_demo_screen_json((uint32_t)(count < 0 ? 0 : count));
+  jstring out = (*e)->NewStringUTF(e, lean_string_cstr(s));
+  lean_dec_ref(s);
+  return out;
 }

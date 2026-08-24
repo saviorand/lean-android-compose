@@ -86,25 +86,21 @@ private fun JSONObject.modifier(): Modifier {
 }
 
 /**
- * The Lean-authored screen bundled with the app.
+ * A screen whose structure Lean computes on the device.
  *
- * Reads the tree Lean rendered at build time. Once `lean-compose` is cross-compiled
- * into `libleanshared.so`, this becomes a JNI call to `lean_demo_screen_json`
- * instead, and the layout can then depend on runtime state.
+ * [count] is passed into Lean, which returns a whole view tree for that state. The
+ * layout is therefore a function of runtime state rather than something fixed at
+ * build time, which is what a server-driven UI needs: swap the Lean side and the
+ * screen changes without touching this file.
  */
 @Composable
-fun LeanAuthoredScreen() {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val tree = androidx.compose.runtime.remember {
-        runCatching {
-            JSONObject(ctx.assets.open("screen.json").bufferedReader().use { it.readText() })
-        }.getOrNull()
+fun LeanAuthoredScreen(count: Int, onAction: (String) -> Unit) {
+    val tree = androidx.compose.runtime.remember(count) {
+        runCatching { JSONObject(Lean.screenJson(count)) }.getOrNull()
     }
     if (tree == null) {
-        Text("screen.json missing")
+        Text("Lean did not return a renderable tree")
     } else {
-        LeanView(tree) { action ->
-            android.util.Log.i("LeanView", "action: $action")
-        }
+        LeanView(tree, onAction)
     }
 }
