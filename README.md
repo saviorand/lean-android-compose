@@ -19,7 +19,7 @@
 The UI is ordinary Jetpack Compose. Everything below the JNI boundary is Lean, using
 its allocator, its object model and its arbitrary-precision `Nat`.
 
-Verified on a HiBreak (Android 14, arm64-v8a).
+Verified on an Android 14 arm64-v8a device.
 
 - [x] `Lean.factorial(n)` multiplies through Lean's `Nat`, so past 20! it is Lean's
       bignum path rather than 64-bit arithmetic
