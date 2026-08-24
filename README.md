@@ -1,47 +1,50 @@
-# lean-android-compose
+<a name="readme-top"></a>
 
-A Jetpack Compose app whose computation, and optionally whose layout, runs in Lean 4.
+<div align="center">
+  <h3 align="center">lean-android-compose</h3>
+
+  <p align="center">
+    📱 A Compose app whose computation runs in Lean 4 🧮
+    <br/>
+
+   ![Kotlin and Lean][language-shield]
+   [![Apache 2.0 License][license-shield]][license-url]
+   [![Contributors Welcome][contributors-shield]][contributors-url]
+
+  </p>
+</div>
+
+## Overview
+
+The UI is ordinary Jetpack Compose. Everything below the JNI boundary is Lean, using
+its allocator, its object model and its arbitrary-precision `Nat`.
 
 Verified on a HiBreak (Android 14, arm64-v8a).
 
-The UI is ordinary Compose. Everything below the JNI boundary is Lean, using its
-allocator, its object model and its arbitrary-precision `Nat`.
+- [x] `Lean.factorial(n)` multiplies through Lean's `Nat`, so past 20! it is Lean's
+      bignum path rather than 64-bit arithmetic
+- [x] `Lean.sumTo(n)` builds a real Lean linked list with `lean_alloc_ctor` and walks it
+- [x] `LeanView.kt` draws a tree authored with
+      [lean-compose](https://github.com/saviorand/lean-compose)
+- [ ] That tree computed on-device rather than at build time
 
-## What it does
-
-- `Lean.version()` reports the runtime's own version and platform target.
-- `Lean.factorial(n)` multiplies through Lean's `Nat`, so past 20! it is running
-  Lean's bignum path rather than 64-bit arithmetic. The result comes back as a
-  string via `Nat.reprFast`.
-- `Lean.sumTo(n)` builds a genuine Lean linked list with `lean_alloc_ctor` and walks
-  it, exercising the allocator and object layout rather than a C loop.
-- `LeanView.kt` interprets a view tree authored with
-  [lean-compose](https://github.com/saviorand/lean-compose) into real Composables.
-
-## Prerequisites
+## Getting Started
 
 The Lean runtime has to be cross-compiled for Android first; that is
-[lean4-android](https://github.com/saviorand/lean4-android). Its
-`scripts/build-stage1.sh` produces the `libleanshared.so` this app links against.
+[lean4-android](https://github.com/saviorand/lean4-android), whose
+`scripts/build-stage1.sh` produces the `libleanshared.so` this links against.
 
-Then:
+You also need the Android NDK, the SDK (platform 34, build-tools 34) and JDK 17+.
 
-- Android NDK r29 (or set `ANDROID_NDK_HOME`)
-- Android SDK, platform 34 and build-tools 34
-- JDK 17+
+The native libraries are build outputs, not in the repository:
 
-## Building
-
-The native libraries are not in the repository; they are ~161 MB and are build
-outputs of lean4-android.
-
-```
+```bash
 NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64
 LEAN=<lean4-android build>/stage/stage1
 
-cp $LEAN/lib/lean/libleanshared.so          app/src/main/jniLibs/arm64-v8a/
+cp $LEAN/lib/lean/libleanshared.so            app/src/main/jniLibs/arm64-v8a/
 cp $NDK/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
-                                            app/src/main/jniLibs/arm64-v8a/
+                                              app/src/main/jniLibs/arm64-v8a/
 cp <lean4-android build>/libuv-build/libuv.so app/src/main/jniLibs/arm64-v8a/
 
 $NDK/bin/aarch64-linux-android34-clang -shared -fPIC \
@@ -54,42 +57,55 @@ ANDROID_HOME=~/Library/Android/sdk ./gradlew assembleDebug
 
 64 MB APK, from 162 MB of raw libraries; Gradle compresses them.
 
-## The manifest flag that makes it work
+## The flag that makes it work
 
 ```xml
 <application android:allowNativeHeapPointerTagging="false">
 ```
 
-Without it the process aborts:
+Without it the process aborts with `Pointer tag ... was truncated`. Android 11+ stores
+a tag in the top byte of every heap pointer, and Lean's `lean_box` is `(n << 1) | 1`,
+which shifts values into that byte, so Bionic's `free()` sees a stripped tag and
+aborts. The flag is the only supported way to turn this off and it is APK-only: the
+same libraries cannot be made to work from `adb shell`.
 
-```
-Pointer tag for 0x773f2394b0 was truncated
-Fatal signal 6 (SIGABRT)
-```
-
-Android 11+ stores a tag in the top byte of every heap pointer. Lean's `lean_box` is
-`(n << 1) | 1`, which shifts values into that byte, so Bionic's `free()` sees a
-stripped tag and aborts. This flag is the only supported way to turn it off, and it
-is APK-only: the same libraries cannot be made to work from `adb shell`.
-
-llama.cpp and Kotlin hit the same abort under Termux, so it is a known class of
-failure rather than anything specific to Lean. Google documents the flag as a
-temporary escape hatch; the durable fix is upstream, in Lean not using the top byte.
+llama.cpp and Kotlin hit the same abort under Termux, so this is a known class of
+failure rather than anything specific to Lean.
 
 ## Notes
 
-**`Lean.init()` must not run on the main thread.** Mapping ~160 MB and running
-Lean's module initialisers takes minutes on first launch, so the UI shows a progress
+**`Lean.init()` must not run on the main thread.** Mapping ~160 MB and running Lean's
+module initialisers takes minutes on first launch, so the UI shows a progress
 indicator and does the work on `Dispatchers.Default`.
 
-**Two things that cost time:**
+Two things that cost time: `@style/Theme.Material3.DayNight.NoActionBar` is not an XML
+resource, since Compose themes in code; and `Nat` to `String` is `l_Nat_reprFast`, not
+`lean_nat_to_string`, which does not exist.
 
-- `@style/Theme.Material3.DayNight.NoActionBar` is not an XML resource. Compose
-  themes in code, so the platform theme only has to stay out of the way.
-- `lean_nat_to_string` does not exist. `Nat` to `String` is `l_Nat_reprFast`,
-  declared `extern`; it consumes its argument.
+> [!NOTE]
+> The Lean-authored screen is rendered from JSON generated at build time. Computing it
+> on-device crashed during Lean's initialisation once `libleancompose.so` was loaded,
+> and diagnosing that needs a logcat we could not obtain. The export
+> (`lean_demo_screen_json`) is in place; see the revert commit for what is known.
 
-**The Lean-authored screen is generated at build time**, not by Lean running on the
-phone: `app/src/main/assets/screen.json` is `lean-compose`'s output. Cross-compiling
-that library into `libleanshared.so` would let the layout depend on runtime state
-via the already-exported `lean_demo_screen_json`.
+## Roadmap
+
+- [ ] On-device view trees, so layouts can depend on runtime state
+- [ ] Trim the runtime; 161 MB is most of the APK
+- [ ] More node kinds in `LeanView.kt`
+
+## Contributing
+
+Contributions are welcome. If you can get the on-device path working, that is the most
+valuable thing here.
+
+## License
+
+Distributed under the Apache 2.0 License. See [LICENSE](LICENSE) for more information.
+
+<!-- MARKDOWN LINKS & IMAGES -->
+[language-shield]: https://img.shields.io/badge/language-kotlin%20%2B%20lean4-blueviolet
+[license-shield]: https://img.shields.io/github/license/saviorand/lean-android-compose?logo=github
+[license-url]: https://github.com/saviorand/lean-android-compose/blob/main/LICENSE
+[contributors-shield]: https://img.shields.io/badge/contributors-welcome!-blue
+[contributors-url]: https://github.com/saviorand/lean-android-compose#contributing
