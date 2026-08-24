@@ -16,27 +16,29 @@
 
 ## Overview
 
-the UI is ordinary Jetpack Compose. everything below the JNI boundary is Lean, using
+The UI is ordinary Jetpack Compose. Everything below the JNI boundary is Lean, using
 its allocator, its object model and its arbitrary-precision `Nat`.
 
-tested on an Android 14 arm64-v8a device.
+Tested on an Android 14 arm64-v8a device.
 
-- [x] `Lean.factorial(n)` multiplies through Lean's `Nat`, so past 20! it's Lean's
-      bignum path and not 64-bit arithmetic
-- [x] `Lean.sumTo(n)` builds a real Lean linked list with `lean_alloc_ctor` and walks it
-- [x] `LeanView.kt` draws a tree authored with
+- [x] `Lean.factorial(n)` multiplies through Lean's `Nat`, so beyond 20! it exercises
+      the bignum path rather than 64-bit arithmetic
+- [x] `Lean.sumTo(n)` builds a Lean linked list with `lean_alloc_ctor` and walks it
+- [x] `LeanView.kt` draws a view tree authored with
       [lean-compose](https://github.com/saviorand/lean-compose)
-- [ ] that tree computed on-device instead of at build time
+- [ ] That tree computed on-device rather than at build time
 
 ## Getting Started
 
-the Lean runtime has to be cross-compiled for Android first, which is
-[lean4-android](https://github.com/saviorand/lean4-android). its
-`scripts/build-stage1.sh` produces the `libleanshared.so` this links against.
+The Lean runtime has to be cross-compiled for Android first, which is
+[lean4-android](https://github.com/saviorand/lean4-android). Its
+`scripts/build-stage1.sh` produces the `libleanshared.so` this application links
+against.
 
-you also need the Android NDK, the SDK (platform 34, build-tools 34) and JDK 17+.
+You also need the Android NDK, the SDK with platform 34 and build-tools 34, and
+JDK 17 or later.
 
-the native libraries are build outputs, not in the repo:
+The native libraries are build outputs and are not committed:
 
 ```bash
 NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64
@@ -55,49 +57,51 @@ $NDK/bin/aarch64-linux-android34-clang -shared -fPIC \
 ANDROID_HOME=~/Library/Android/sdk ./gradlew assembleDebug
 ```
 
-64 MB APK out of 162 MB of raw libraries, Gradle compresses them.
+The result is a 64 MB APK, compressed by Gradle from 162 MB of raw libraries.
 
-## The flag that makes it work
+## Pointer tagging
+
+The application manifest sets:
 
 ```xml
 <application android:allowNativeHeapPointerTagging="false">
 ```
 
-without it the process aborts with `Pointer tag ... was truncated`. Android 11+ puts
-a tag in the top byte of every heap pointer, and Lean's `lean_box` is `(n << 1) | 1`,
-which shifts values into that byte, so Bionic's `free()` sees a stripped tag and
-aborts. this flag is the only supported way to turn it off and it's APK-only, so the
-same libraries can't be made to work from `adb shell`.
+Without it the process aborts with `Pointer tag ... was truncated`. Android 11 and
+later store a tag in the top byte of every heap pointer, and Lean's `lean_box` is
+`(n << 1) | 1`, which shifts values into that byte, so Bionic's `free()` sees a
+stripped tag and aborts. The flag is the only supported way to disable this, and it
+applies to APKs only, which is why the same libraries cannot be run from `adb shell`.
 
-llama.cpp and Kotlin hit the same abort under Termux, so it's a known class of
-failure and not something specific to Lean.
+llama.cpp and Kotlin encounter the same abort under Termux, so this is a known class
+of failure rather than something specific to Lean.
 
 ## Notes
 
-**`Lean.init()` must not run on the main thread.** mapping ~160 MB and running Lean's
-module initialisers takes minutes on first launch, so the UI shows a progress
-indicator and does the work on `Dispatchers.Default`.
+`Lean.init()` must not run on the main thread. Mapping roughly 160 MB and running
+Lean's module initialisers takes minutes on first launch, so the UI shows a progress
+indicator and performs the work on `Dispatchers.Default`.
 
-two things that cost me time: `@style/Theme.Material3.DayNight.NoActionBar` isn't an
-XML resource, since Compose themes in code. and `Nat` to `String` is `l_Nat_reprFast`,
-not `lean_nat_to_string`, which doesn't exist.
+Two details worth recording: `@style/Theme.Material3.DayNight.NoActionBar` is not an
+XML resource, since Compose themes in code; and `Nat` to `String` is
+`l_Nat_reprFast`, not `lean_nat_to_string`, which does not exist.
 
 > [!NOTE]
-> the Lean-authored screen is rendered from JSON generated at build time. computing
-> it on-device crashed during Lean's initialisation once `libleancompose.so` was
-> loaded, and working that out needs a logcat i couldn't get. the export
-> (`lean_demo_screen_json`) is in place; see the revert commit for what's known.
+> The Lean-authored screen is currently rendered from JSON generated at build time.
+> Computing it on-device crashed during Lean's initialisation once
+> `libleancompose.so` was loaded, and diagnosing that needs a logcat. The export
+> `lean_demo_screen_json` is in place; see the revert commit for what is known.
 
 ## Roadmap
 
-- [ ] on-device view trees so layouts can depend on runtime state
-- [ ] trim the runtime, 161 MB is most of the APK
-- [ ] more node kinds in `LeanView.kt`
+- [ ] On-device view trees, so layouts can depend on runtime state
+- [ ] Reduce the runtime size, which accounts for most of the APK
+- [ ] More node kinds in `LeanView.kt`
 
 ## Contributing
 
-contributions welcome. if you can get the on-device path working that's the most
-useful thing here.
+Contributions are welcome. Getting the on-device path working would be the most
+valuable addition.
 
 ## License
 
