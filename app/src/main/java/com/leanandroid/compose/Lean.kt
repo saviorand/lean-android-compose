@@ -1,15 +1,14 @@
 package com.leanandroid.compose
 
 /**
- * The Lean runtime. Loading libleanshared.so takes a couple of minutes on first
- * launch because it is ~160 MB, so callers should treat [init] as slow.
+ * The Lean runtime. [init] still runs Lean's module initialisers, so treat it as
+ * slow and keep it off the main thread.
  */
 object Lean {
     init {
-        System.loadLibrary("leanshared")
-        // lean-compose depends on the runtime above and must load before the bridge
-        // that calls into it.
-        System.loadLibrary("leancompose")
+        // One library: the Lean runtime, the parts of the standard library this app
+        // reaches, lean-compose and the JNI bridge are linked together statically and
+        // reduced with --gc-sections.
         System.loadLibrary("leanbridge")
     }
 

@@ -39,26 +39,48 @@ against.
 You also need the Android NDK, the SDK with platform 34 and build-tools 34, and
 JDK 17 or later.
 
-The native libraries are build outputs and are not committed:
+The application ships a single native library, built by linking the Lean runtime, the
+parts of the standard library it reaches, `lean-compose` and the JNI bridge together
+statically:
 
 ```bash
 NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64
 LEAN=<lean4-android build>/stage/stage1
 
-cp $LEAN/lib/lean/libleanshared.so            app/src/main/jniLibs/arm64-v8a/
-cp $NDK/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
-                                              app/src/main/jniLibs/arm64-v8a/
-cp <lean4-android build>/libuv-build/libuv.so app/src/main/jniLibs/arm64-v8a/
+# lean-compose, from the C Lean already emitted under .lake/build/ir
+for f in <lean-compose>/.lake/build/ir/Compose/*.c; do
+  $NDK/bin/aarch64-linux-android34-clang -c -fPIC -Oz \
+    -ffunction-sections -fdata-sections -fvisibility=hidden \
+    "$f" -I $LEAN/include -o "obj/$(basename $f .c).o"
+done
 
-$NDK/bin/aarch64-linux-android34-clang -shared -fPIC \
+$NDK/bin/aarch64-linux-android34-clang -shared -fPIC -Oz \
+  -ffunction-sections -fdata-sections \
   -o app/src/main/jniLibs/arm64-v8a/libleanbridge.so \
-  app/src/main/cpp/leanbridge.c \
-  -I $LEAN/include -L $LEAN/lib/lean -lleanshared -Wl,--no-undefined
+  app/src/main/cpp/leanbridge.c obj/*.o -I $LEAN/include \
+  -Wl,--gc-sections \
+  $LEAN/lib/lean/libInit.a $LEAN/lib/lean/libStd.a \
+  $LEAN/runtime/libleanrt_initial-exec.a $LEAN/lib/lean/libleancpp.a \
+  <lean4-android build>/libuv-build/libuv.a \
+  <lean4-android build>/openssl-install/lib/libcrypto.a \
+  <lean4-android build>/openssl-install/lib/libssl.a \
+  -lm -ldl
+
+$NDK/bin/llvm-strip app/src/main/jniLibs/arm64-v8a/libleanbridge.so
+cp $NDK/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so \
+   app/src/main/jniLibs/arm64-v8a/
 
 ANDROID_HOME=~/Library/Android/sdk ./gradlew assembleDebug
 ```
 
-The result is a 64 MB APK, compressed by Gradle from 162 MB of raw libraries.
+The result is a 12 MB APK. Linking against the archives with `--gc-sections` instead
+of shipping `libleanshared.so` takes the runtime from 161 MB to 10 MB: the
+application reaches 42 of the runtime's 223,267 exported symbols and none of them
+belong to the elaborator or compiler, so `libLean.a` is left out entirely.
+
+`libleanrt_initial-exec.a` rather than `libleanrt.a`: the latter uses local-exec TLS
+and fails to link into a shared library with `R_AARCH64_TLSLE_ADD_TPREL_HI12 cannot
+be used with -shared`.
 
 ## Pointer tagging
 
@@ -109,7 +131,6 @@ constraints and throws when composed inside a vertical scroller.
 
 ## Roadmap
 
-- [ ] Reduce the runtime size, which accounts for most of the APK
 - [ ] More node kinds in `LeanView.kt`
 
 ## Contributing
