@@ -26,7 +26,8 @@ Tested on an Android 14 arm64-v8a device.
 - [x] `Lean.sumTo(n)` builds a Lean linked list with `lean_alloc_ctor` and walks it
 - [x] `LeanView.kt` draws a view tree authored with
       [lean-compose](https://github.com/saviorand/lean-compose)
-- [ ] That tree computed on-device rather than at build time
+- [x] That tree computed on-device: `Lean.screenJson(count)` returns a whole layout
+      for the current state, so the UI is a function of runtime state
 
 ## Getting Started
 
@@ -86,22 +87,35 @@ Two details worth recording: `@style/Theme.Material3.DayNight.NoActionBar` is no
 XML resource, since Compose themes in code; and `Nat` to `String` is
 `l_Nat_reprFast`, not `lean_nat_to_string`, which does not exist.
 
-> [!NOTE]
-> The Lean-authored screen is currently rendered from JSON generated at build time.
-> Computing it on-device crashed during Lean's initialisation once
-> `libleancompose.so` was loaded, and diagnosing that needs a logcat. The export
-> `lean_demo_screen_json` is in place; see the revert commit for what is known.
+`lean-compose` does not need a full Lean rebuild to reach the device. Lean emits C
+for it under `.lake/build/ir/`, and that C cross-compiles against the existing
+`libleanshared.so` into a library of about 100 KB:
+
+```bash
+for f in <lean-compose>/.lake/build/ir/Compose/*.c; do
+  $NDK/bin/aarch64-linux-android34-clang -c -fPIC -O2 "$f" -I $LEAN/include \
+    -o "obj/$(basename $f .c).o"
+done
+$NDK/bin/aarch64-linux-android34-clang -shared -fPIC \
+  -o app/src/main/jniLibs/arm64-v8a/libleancompose.so \
+  obj/*.o -L $LEAN/lib/lean -lleanshared -Wl,--no-undefined
+```
+
+Two details matter. Module initialisers take only `builtin`, not an IO world token,
+and `lean-compose`'s initialiser must run after the core runtime is up but before
+`lean_io_mark_end_initialization`. And `LeanView.kt` draws a `scaffold` node as a bar
+above its body rather than as a Material `Scaffold`, since `Scaffold` fills its
+constraints and throws when composed inside a vertical scroller.
 
 ## Roadmap
 
-- [ ] On-device view trees, so layouts can depend on runtime state
 - [ ] Reduce the runtime size, which accounts for most of the APK
 - [ ] More node kinds in `LeanView.kt`
 
 ## Contributing
 
-Contributions are welcome. Getting the on-device path working would be the most
-valuable addition.
+Contributions are welcome, particularly more node kinds and anything that reduces
+the size of the shipped runtime.
 
 ## License
 
